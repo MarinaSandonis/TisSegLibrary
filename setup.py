@@ -3,7 +3,7 @@ from setuptools import setup
 setup(
     name='tisseglibrary',
     packages=['tisseglibrary'], # Mismo nombre que en la estructura de carpetas de arriba
-    version='0.1.0',
+    version='0.1.1',
     license='Apache License 2.0', # La licencia que tenga tu paquete
     description='It gets the 2D/3D segmentation of the abdomen and the thigh from MR images',
     author='Marina Sandonis',
