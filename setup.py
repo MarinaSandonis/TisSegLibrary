@@ -10,7 +10,7 @@ with open("README.md") as readme_file:
 setup_requirements = ["pytest-runner"]
 
 
-test_requirements = ["pytest", "pytest-bdd", 'dataclasses; python_version<"3.7"']
+test_requirements = ["pytest", "pytest-bdd", 'dataclasses; python_version<"2.7"']
 
 setup(
     author="Marina Sandonis",
@@ -27,7 +27,7 @@ setup(
     ],
     description="It gets the 2D/3D segmentation of the abdomen and the thigh",
     license="Apache license 2.0",
-    long_description=readme + "\n\n" + history,
+    long_description=readme,
     include_package_data=True,
     keywords="tissue segmnetation",
     name="tisseglibrary",
