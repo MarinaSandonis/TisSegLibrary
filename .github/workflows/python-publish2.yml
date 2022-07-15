@@ -30,14 +30,6 @@ jobs:
         pip install
         build
         --user
-    - name: Build a binary wheel and a source tarball
-      run: >-
-        python -m
-        build
-        --sdist
-        --wheel
-        --outdir dist/
-        .
     - name: Build package
       run: python -m build
     - name: Publish distribution 📦 to PyPI
