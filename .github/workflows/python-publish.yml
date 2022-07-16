@@ -32,12 +32,10 @@ jobs:
         pip install build
     - name: Build package
       run: python -m build
-    - name: Build and publish
-      env:
-        TWINE_USERNAME: ${{ secrets.PYPI_USERNAME }}
-        TWINE_PASSWORD: ${{ secrets.PYPI_PASSWORD }}
-      run: |
-        pip install wheel
-        pip install twine
-        python setup.py sdist bdist_wheel
-        python -m twine upload -u MarinaSandonis -p ${{ secrets.PYPI_PASSWORD }} --repository-url https://pypi.org/legacy/ dist/* --verbose
+    - name: Publish distribution 📦 to  PyPI
+      uses: pypa/gh-action-pypi-publish@master
+      with:
+        skip_existing: true
+        user: __token__
+        password: ${{ secrets.test_pypi_password }}
+        repository_url: https://pypi.org/legacy/
