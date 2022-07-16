@@ -40,4 +40,4 @@ jobs:
         pip install wheel
         pip install twine
         python setup.py sdist bdist_wheel
-        python -m twine upload -u ${{ secrets.PYPI_USERNAME }} -p ${{ secrets.PYPI_PASSWORD }} --repository-url https://pypi.org/legacy/ dist/* --verbose
+        python -m twine upload -u MarinaSandonis -p ${{ secrets.PYPI_PASSWORD }} --repository-url https://pypi.org/legacy/ dist/* --verbose
