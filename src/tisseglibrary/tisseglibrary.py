@@ -1,16 +1,13 @@
 from mimetypes import init
-import os
 import SimpleITK as sitk
 import numpy as np
-import glob
-import skimage as sk
 from skimage import exposure, morphology, util
 from sklearn.cluster import KMeans
 import scipy as sp
-from scipy.stats import kde
 import slicer
 from operator import xor
 
+version = 'v0.3.1'
 
 def geo_strep(marker, mask, se, method):
         if method == 'dilate':
@@ -378,7 +375,7 @@ def CalculateLabelMap(filled_thigh_mask_img, thigh_mask_img , muslo_fat_img_slic
 
         #InterMuscular + vasos + piel
         class01 = np.where (classImage == mean_classes[0,1], 1, 0)
-        class01 = np.where (bone == 1, 0, class01)
+        class01 = np.where (bone == 1, 0, class01).astype(np.float64)
         class01_img= sitk.GetImageFromArray(class01)
         class01_img.CopyInformation(muslo_fat_img_slices)
 
@@ -393,13 +390,13 @@ def CalculateLabelMap(filled_thigh_mask_img, thigh_mask_img , muslo_fat_img_slic
       
         #Musculo
         class21 = np.where (classImage == mean_classes[2,1], 1, 0)
-        class21_clean = (class21*filled_thigh_mask) 
+        class21_clean = (class21*filled_thigh_mask) .astype(np.float64)
         class21_img= sitk.GetImageFromArray(class21_clean)
         class21_img.CopyInformation(muslo_fat_img_slices)
 
         #Skin class21
         skin_mt =  np.multiply(dilate, class21_clean)
-        mt_withoutSkin = np.where (skin_mt == 1, 0, class21_clean)
+        mt_withoutSkin = np.where (skin_mt == 1, 0, class21_clean).astype(np.float64)
         mt_withoutSkin_img= sitk.GetImageFromArray(mt_withoutSkin)
         mt_withoutSkin_img.CopyInformation(muslo_fat_img_slices)
 
@@ -411,13 +408,14 @@ def CalculateLabelMap(filled_thigh_mask_img, thigh_mask_img , muslo_fat_img_slic
 
         #Hallo la componenete conexa --> separar la grasa intermuscular de la subcutánea
         suma_mat_clean = morphology.dilation (suma_mat_clean, morphology.ball(6)) #4
-        suma_mat_clean_close= morphology.closing(suma_mat_clean, morphology.ball(5))
+        suma_mat_clean_close= morphology.closing(suma_mat_clean, morphology.ball(5)).astype(np.float64)
         suma_mat_clean_close_img = sitk.GetImageFromArray(suma_mat_clean_close)
         suma_mat_clean_close_img.CopyInformation(muslo_fat_img_slices)
         #Paso a 2D para hacer el convex hull
         suma_mat_clean_close = suma_mat_clean_close.reshape((-1, muslo_water_mat.shape[2]))
         class21_convex_hull_mat = morphology.convex_hull_object(suma_mat_clean_close).astype(np.int32)
         class21_convex_hull_mat = class21_convex_hull_mat.reshape(muslo_water_mat.shape)
+        class21_convex_hull_mat = class21_convex_hull_mat.astype(np.float64)
         class21_convex_hull_img = sitk.GetImageFromArray(class21_convex_hull_mat)
         class21_convex_hull_img.CopyInformation(muslo_fat_img_slices)
 
@@ -431,6 +429,7 @@ def CalculateLabelMap(filled_thigh_mask_img, thigh_mask_img , muslo_fat_img_slic
         vasos_class01_mat = np.where(Act_cont_IMAT_mat == 0, class01_withoutSkin, 0)
         vasos_mt_mat = np.where(Act_cont_IMAT_mat == 0, mt_withoutSkin, 0)
         vasos_mat = vasos_mt_mat+vasos_class01_mat
+        vasos_mat = vasos_mat.astype(np.float64)
         vasos_img = sitk.GetImageFromArray(vasos_mat)
         vasos_img.CopyInformation(muslo_fat_img_slices)
 
@@ -449,6 +448,7 @@ def CalculateLabelMap(filled_thigh_mask_img, thigh_mask_img , muslo_fat_img_slic
         classImage_bw[marrow == 1] = 7 #marrow
         classImage_bw[skin == 1] = 6 #skin
         classImage_bw [filled_thigh_mask == 0] = 0
+        classImage_bw = classImage_bw.astype(np.float64)
         classImage_bw_img  =sitk.GetImageFromArray(classImage_bw)
         classImage_bw_img.CopyInformation(muslo_fat_img_slices)
        
@@ -471,6 +471,8 @@ def ThighSegmentation (fat_img, water_img, RangeSlice, numberOfPartitions, incom
             sum_right, sum_left -- variables que indican si los muslos se han podido dividir
     '''
 
+    print('Processing with TisSegLibrary '+version)
+
     muslo_fat_img_slices = fat_img[:,:, int(RangeSlice[0]):int(RangeSlice[1])]
     muslo_fat_mat = sitk.GetArrayFromImage(muslo_fat_img_slices)
 
@@ -482,7 +484,7 @@ def ThighSegmentation (fat_img, water_img, RangeSlice, numberOfPartitions, incom
     musloShape = fat_img.GetSize()
     ultimosSlices = musloShape[2] - (musloShape[2]*10//100)
     primerosSlices = (musloShape[2]*10//100)
-     
+        
     sum_left = 2
     sum_right = 2
 
@@ -517,7 +519,7 @@ def ThighSegmentation (fat_img, water_img, RangeSlice, numberOfPartitions, incom
     compo_num = compo_filter.GetObjectCount()
     if compo_num > 2:
         slicer.util.errorDisplay('Error detecting thighs') 
-    
+
     dist_img = sitk.SignedMaurerDistanceMap(filled_thigh_mask_img != 0, insideIsPositive=False, squaredDistance=False, useImageSpacing=False)
 
     min_dst = np.min(np.concatenate(sitk.GetArrayFromImage(dist_img)))
@@ -657,233 +659,238 @@ def ThighSegmentation (fat_img, water_img, RangeSlice, numberOfPartitions, incom
     return out_l, out_r, right_full_Q, left_full_Q, sum_right, sum_left
 
 def AbdomenSegmentation( fat_img, water_img , roi_img, RangeSlice_Abdo, numberOfPartitions_Abdo):
-        """
-        Crea un label map con la segmentación del abdomen
+    """
+    Crea un label map con la segmentación del abdomen
 
-        Inputs:
-            fat_img -- imagen de grasa que se desea segmentar
-            water_img_slices -- imagen de agua que se desea segmentar 
-            roi_img -- ROI dibujada manualmente por el ususario
-            numberOfPartitions_Abdo -- conjunto de cortes en que se desea hacer la segmenatción
-            RangeSlices_Abdo --  rango de cortes de la imagen que se desea segmentar
+    Inputs:
+        fat_img -- imagen de grasa que se desea segmentar
+        water_img_slices -- imagen de agua que se desea segmentar 
+        roi_img -- ROI dibujada manualmente por el ususario
+        numberOfPartitions_Abdo -- conjunto de cortes en que se desea hacer la segmenatción
+        RangeSlices_Abdo --  rango de cortes de la imagen que se desea segmentar
 
-        Outputs:
-            classImage2_img -- label map con el resulatado de la segmenatción
-        """
-        abdomen_fat_img_slices = fat_img[:,:, int(RangeSlice_Abdo[0]):int(RangeSlice_Abdo[1])]
-        abdomen_water_img_slices = water_img[:,:,int(RangeSlice_Abdo[0]):int(RangeSlice_Abdo[1])]
-        abdomen_ROI_slices = roi_img[:,:,int(RangeSlice_Abdo[0]):int(RangeSlice_Abdo[1])]
-        abdomen_fat_mat = sitk.GetArrayFromImage(abdomen_fat_img_slices)
-        abdomen_water_mat = sitk.GetArrayFromImage(abdomen_water_img_slices)
-        abdomen_roi_mat = sitk.GetArrayFromImage (abdomen_ROI_slices)
+    Outputs:
+        classImage2_img -- label map con el resulatado de la segmenatción
+    """
 
-        numberOfPartitions_Abdo=int(numberOfPartitions_Abdo)
+    print('Processing with TisSegLibrary '+version)
 
-        abdomenShape = fat_img.GetSize()
-        ultimosSlices_Abdo = abdomenShape[2] - (abdomenShape[2]*10//100)
-        primerosSlices_Abdo = (abdomenShape[2]*10//100)
+    abdomen_fat_img_slices = fat_img[:,:, int(RangeSlice_Abdo[0]):int(RangeSlice_Abdo[1])]
+    abdomen_water_img_slices = water_img[:,:,int(RangeSlice_Abdo[0]):int(RangeSlice_Abdo[1])]
+    abdomen_ROI_slices = roi_img[:,:,int(RangeSlice_Abdo[0]):int(RangeSlice_Abdo[1])]
+    abdomen_fat_mat = sitk.GetArrayFromImage(abdomen_fat_img_slices)
+    abdomen_water_mat = sitk.GetArrayFromImage(abdomen_water_img_slices)
+    abdomen_roi_mat = sitk.GetArrayFromImage (abdomen_ROI_slices)
 
-        #umbralizacion y limpieza
-        OtsuFilter = sitk.OtsuThresholdImageFilter()
-        OtsuFilter.SetInsideValue(0)
-        OtsuFilter.SetOutsideValue(1)
-        thresh_img = OtsuFilter.Execute(abdomen_fat_img_slices)
+    numberOfPartitions_Abdo=int(numberOfPartitions_Abdo)
 
-        adap_thres_open = sitk.BinaryOpeningByReconstruction(thresh_img , kernelRadius = [6,6,6])
-        adap_thres_open_mat = sitk.GetArrayFromImage(adap_thres_open)
-        adap_thres_open.CopyInformation(abdomen_fat_img_slices)
+    abdomenShape = fat_img.GetSize()
+    ultimosSlices_Abdo = abdomenShape[2] - (abdomenShape[2]*10//100)
+    primerosSlices_Abdo = (abdomenShape[2]*10//100)
 
-        #Convex hull para hallar el area del abdomen
-        adap_thres_open_mat_re = adap_thres_open_mat.reshape((-1, adap_thres_open_mat.shape[2]))
-        filled = morphology.convex_hull_object(adap_thres_open_mat_re).astype(np.int32)
-        filled=filled.reshape (abdomen_fat_mat.shape)
-        filled_dilate= morphology.dilation ( filled, morphology.ball(1))
-        filled_img = sitk.GetImageFromArray(filled_dilate)
-        filled_img.CopyInformation(abdomen_fat_img_slices)
+    #umbralizacion y limpieza
+    OtsuFilter = sitk.OtsuThresholdImageFilter()
+    OtsuFilter.SetInsideValue(0)
+    OtsuFilter.SetOutsideValue(1)
+    thresh_img = OtsuFilter.Execute(abdomen_fat_img_slices)
 
-        #Contorno activo, para definir borde exterior del abdomen
-        filled_img = act_cont (abdomen_fat_img_slices, filled_img, -7.0, 1.5 ,1.5, 1.0, -2.0, 9, RangeSlice_Abdo)
-        filled = sitk.GetArrayFromImage(filled_img)
+    adap_thres_open = sitk.BinaryOpeningByReconstruction(thresh_img , kernelRadius = [6,6,6])
+    adap_thres_open_mat = sitk.GetArrayFromImage(adap_thres_open)
+    adap_thres_open.CopyInformation(abdomen_fat_img_slices)
 
+    #Convex hull para hallar el area del abdomen
+    adap_thres_open_mat_re = adap_thres_open_mat.reshape((-1, adap_thres_open_mat.shape[2]))
+    filled = morphology.convex_hull_object(adap_thres_open_mat_re).astype(np.int32)
+    filled=filled.reshape (abdomen_fat_mat.shape)
+    filled_dilate= morphology.dilation ( filled, morphology.ball(1)).astype(np.float64)
+    filled_img = sitk.GetImageFromArray(filled_dilate)
+    filled_img.CopyInformation(abdomen_fat_img_slices)
 
-        #PRE-PROCESADO MORPFOLÓGICO
-        fat_open = sitk.OpeningByReconstruction(abdomen_fat_img_slices , kernelRadius = [6,6,6])
-        print('fat open', fat_open.GetSize())
-        print('fat img', fat_img.GetSize())
+    #Contorno activo, para definir borde exterior del abdomen
+    filled_img = act_cont (abdomen_fat_img_slices, filled_img, -7.0, 1.5 ,1.5, 1.0, -2.0, 9, RangeSlice_Abdo)
+    filled = sitk.GetArrayFromImage(filled_img)
 
+    #PRE-PROCESADO MORPFOLÓGICO
+    fat_open = sitk.OpeningByReconstruction(abdomen_fat_img_slices , kernelRadius = [6,6,6])
+    print('fat open', fat_open.GetSize())
+    print('fat img', fat_img.GetSize())
 
-        #Contorno activo de la ROI
-        ROI_acti =act_cont(fat_open, abdomen_ROI_slices, -0.185, 0.7, 0.7, 1.0, -7, 13, RangeSlice_Abdo)
-        ROI_acti.CopyInformation(abdomen_fat_img_slices)
-        ROI_acti_mat = sitk.GetArrayFromImage(ROI_acti)
-       
-        #Calculo FF
-        abdomen_fat_eps =np.where(abdomen_fat_mat==0, np.finfo(float).eps, abdomen_fat_mat)  #Así evitamos el 0/0
-        abdomen_water_eps =np.where(abdomen_water_mat==0, np.finfo(float).eps, abdomen_water_mat)  #Así evitamos el 0/0
-        FF_mat = np.divide(abdomen_fat_eps, (abdomen_fat_eps+abdomen_water_eps)) 
-        FF_clean = np.multiply (FF_mat, filled)
-        FF_img =sitk.GetImageFromArray(FF_clean)
-        FF_img.CopyInformation(abdomen_fat_img_slices)
-
-        #K-Means de FF
-        classImage_img, brillo = cluster(FF_img, 3,numberOfPartitions_Abdo, RangeSlice_Abdo, 
-                                primerosSlices_Abdo, ultimosSlices_Abdo, mask= filled_img, centroids=np.array([[0.1], [1], [0.5]]))
-
-        classImage = sitk.GetArrayFromImage(classImage_img)
-
-        #Defino los diferentes clusters
-        class01 = np.where (classImage == brillo[0,1], 1, 0)
-        class01_img= sitk.GetImageFromArray(class01)
-        class01_img.CopyInformation(abdomen_fat_img_slices)
-
-        class11 = np.where (classImage == brillo[1,1], 1, 0)
-        class11_img= sitk.GetImageFromArray(class11)
-        class11_img.CopyInformation(abdomen_fat_img_slices)
-
-        class21 = np.where (classImage == brillo[2,1], 1, 0)
-        class21_clean = np.multiply(class21, filled)
-        class21_img= sitk.GetImageFromArray(class21_clean)
-        class21_img.CopyInformation(abdomen_fat_img_slices)
-
-        #Caculo contorno interior de SAT y hallo edema y vasos
-        class11_img = sitk.Cast(class11_img, sitk.sitkFloat32)
-        ROI_acti = sitk.Cast(ROI_acti, sitk.sitkFloat32)
-
-        #Selecciono el SAT
-        class11_sinROI_img = class11_img -ROI_acti
-        class11_sinROI = sitk.GetArrayFromImage(class11_sinROI_img)
-        class11_sinROI = np.where (class11_sinROI<0, 0, class11_sinROI)
-        class11_sinROI =class11_sinROI * filled
-        class11_sinROI_img_clean = sitk.GetImageFromArray(class11_sinROI)
-        class11_sinROI_img_clean.CopyInformation(abdomen_fat_img_slices)
-
-        #Limpieza de la zona interior  y relleno de los posibles edemas
-        class11_sinROI_img_clean = sitk.Cast(class11_sinROI_img_clean, sitk.sitkInt32)
-        class11_sinROI_mat_clean = sitk.GetArrayFromImage(class11_sinROI_img_clean)
-        class11_sinROI_mat_clean = morphology.opening(class11_sinROI_mat_clean, morphology.ball(2))
-        class11_sinROI_img_clean = sitk.GetImageFromArray(class11_sinROI_mat_clean)
-        class11_sinROI_img_clean.CopyInformation(abdomen_fat_img_slices)
-
-        class11_sinROI_open = sitk.BinaryOpeningByReconstruction(class11_sinROI_img_clean, kernelRadius = [5,5,5])
-        class11_sinROI_open.CopyInformation(abdomen_fat_img_slices)
-
-        class11_sinROI_open_mat = sitk.GetArrayFromImage(class11_sinROI_open)
-        class11_sinROI_open_close_mat = morphology.closing (class11_sinROI_open_mat, morphology.ball(2))
-        
-        class11_sinROI_filled = morphology.closing (class11_sinROI_open_close_mat, morphology.ball(5)) #este es para rellenar el edema
-        class11_sinROI_filled_img = sitk.GetImageFromArray(class11_sinROI_filled)
-        class11_sinROI_filled_img.CopyInformation(abdomen_fat_img_slices)
-
-        #Selecciona la zona interior (no selecciono el edema)
-        Out_erosion  =morphology.erosion (filled, morphology.ball(5)).astype(np.int32)
-        BWGmA_incom = util.invert((adap_thres_open_mat).astype(np.float32)).astype(np.int32) 
-        Out_erosion_img = sitk.GetImageFromArray(Out_erosion)
-        Out_erosion_img.CopyInformation(abdomen_fat_img_slices)
-        BWGmA_inco_img = sitk.GetImageFromArray(BWGmA_incom)
-        BWGmA_inco_img.CopyInformation(abdomen_fat_img_slices)
-
-        multi = np.multiply (BWGmA_incom, Out_erosion)
-        multi_img = sitk.GetImageFromArray(multi)
-        multi_img.CopyInformation(abdomen_fat_img_slices)
-        closing =sitk.BinaryClosingByReconstruction ( multi_img, kernelRadius = [7,7,7])
-        opening =sitk.BinaryOpeningByReconstruction ( closing, kernelRadius = [3,3,3])
-
-        interse = opening & class11_sinROI_filled_img
-        interior = opening - interse
-
-        #Convex hull
-        opening_mat = sitk.GetArrayFromImage(interior)
-        opening_mat =morphology.closing (opening_mat, morphology.ball(7))
-        opening_mat = opening_mat.reshape((-1, opening_mat.shape[2]))
-        convex_hull =  morphology.convex_hull_object(opening_mat).astype(np.int32)
-        convex_hull = convex_hull.reshape(abdomen_fat_mat.shape)
-        convex_hull_dilate = morphology.dilation (convex_hull, morphology.ball(2.5))
-        convex_img = sitk.GetImageFromArray(convex_hull_dilate)
-        convex_img.CopyInformation(abdomen_fat_img_slices)
-
-        #Contornos activos, definir contorno interior del SAT
-        active_cont = act_cont (fat_open, convex_img, -3.0, 0.35, 0.35, 1.5, -6.0, 9, RangeSlice_Abdo)
-        active_cont.CopyInformation(abdomen_fat_img_slices)
-        active_mat = sitk.GetArrayFromImage(active_cont)
-
-        #DEINO LAS COMPONENTES
-        #SAT
-        SAT = np.where ( active_mat==1, 0, filled)
-        SAT_img = sitk.GetImageFromArray(SAT)
-        SAT_img.CopyInformation(abdomen_fat_img_slices)
+    #Contorno activo de la ROI
+    ROI_acti =act_cont(fat_open, abdomen_ROI_slices, -0.185, 0.7, 0.7, 1.0, -7, 13, RangeSlice_Abdo)
+    ROI_acti.CopyInformation(abdomen_fat_img_slices)
+    ROI_acti_mat = sitk.GetArrayFromImage(ROI_acti)
     
-        #IMAT
-        IMAT_area = xor (ROI_acti_mat.astype(np.bool_),  active_mat.astype(np.bool_) ).astype(np.float64)
-        IMAT = np.where (classImage*IMAT_area == brillo[1,1], 1, 0)
-        IMAT_img = sitk.GetImageFromArray(IMAT)
-        IMAT_img.CopyInformation(abdomen_fat_img_slices)
+    #Calculo FF
+    abdomen_fat_eps =np.where(abdomen_fat_mat==0, np.finfo(float).eps, abdomen_fat_mat)  #Así evitamos el 0/0
+    abdomen_water_eps =np.where(abdomen_water_mat==0, np.finfo(float).eps, abdomen_water_mat)  #Así evitamos el 0/0
+    FF_mat = np.divide(abdomen_fat_eps, (abdomen_fat_eps+abdomen_water_eps)) 
+    FF_clean = np.multiply (FF_mat, filled)
+    FF_img =sitk.GetImageFromArray(FF_clean)
+    FF_img.CopyInformation(abdomen_fat_img_slices)
 
-        #BONE
-        BoneAndFat = np.where (classImage==brillo[0,1], 1, 0).astype(np.int32)
-        BoneAndFat_img = sitk.GetImageFromArray(BoneAndFat)
-        BoneAndFat_img.CopyInformation(abdomen_fat_img_slices)
-        Bone = IMAT_area * BoneAndFat
-        Bone_img = sitk.GetImageFromArray(Bone)
-        Bone_img.CopyInformation(abdomen_fat_img_slices)
+    #K-Means de FF
+    classImage_img, brillo = cluster(FF_img, 3,numberOfPartitions_Abdo, RangeSlice_Abdo, 
+                            primerosSlices_Abdo, ultimosSlices_Abdo, mask= filled_img, centroids=np.array([[0.1], [1], [0.5]]))
 
-        #MT
-        MT = class21_clean 
-        MT_img = sitk.GetImageFromArray(MT)
-        MT_img.CopyInformation(abdomen_fat_img_slices)
+    classImage = sitk.GetArrayFromImage(classImage_img)
 
-        #VAT
-        VAT_area = classImage*ROI_acti_mat
-        VAT = np.where (VAT_area > 0, 1, 0)
-        VAT_img = sitk.GetImageFromArray(VAT)
-        VAT_img.CopyInformation(abdomen_fat_img_slices)
+    #Defino los diferentes clusters
+    class01 = np.where (classImage == brillo[0,1], 1, 0).astype(np.float64)
+    class01_img= sitk.GetImageFromArray(class01)
+    class01_img.CopyInformation(abdomen_fat_img_slices)
 
-        #AIR
-        ROI_erode = morphology.erosion (ROI_acti_mat, morphology.ball(1.5)).astype(np.float32)
-        air = (VAT_area * BoneAndFat).astype(np.bool_)
-        air = air * ROI_erode
-        air_img = sitk.GetImageFromArray(air.astype(np.int32))
-        air_img.CopyInformation(abdomen_fat_img_slices)
+    class11 = np.where (classImage == brillo[1,1], 1, 0).astype(np.float64)
+    class11_img= sitk.GetImageFromArray(class11)
+    class11_img.CopyInformation(abdomen_fat_img_slices)
 
-        #OTHER TISSUE
-        Other_tissue = np.multiply(class21_clean, ROI_erode)
-        Other_tissue_img = sitk.GetImageFromArray(Other_tissue)
-        Other_tissue_img.CopyInformation(abdomen_fat_img_slices)
+    class21 = np.where (classImage == brillo[2,1], 1, 0)
+    class21_clean = np.multiply(class21, filled).astype(np.float64)
+    class21_img= sitk.GetImageFromArray(class21_clean)
+    class21_img.CopyInformation(abdomen_fat_img_slices)
 
-        #SKIN
-        filled_erode = morphology.erosion (filled, morphology.ball(7)).astype(np.float32)
-        Skin_class01 = util.invert(filled_erode) * (class01)
-        Skin_class21 = util.invert(filled_erode) * (class21)
-        Skin = (Skin_class01 + Skin_class21)* filled
-        Skin_img = sitk.GetImageFromArray(Skin)
-        Skin_img.CopyInformation(abdomen_fat_img_slices)
-        Skin_img=sitk.Cast(Skin_img, sitk.sitkInt32)
+    #Caculo contorno interior de SAT y hallo edema y vasos
+    class11_img = sitk.Cast(class11_img, sitk.sitkFloat32)
+    ROI_acti = sitk.Cast(ROI_acti, sitk.sitkFloat32)
 
-        #EDEMA + VESSELS
-        suma_classes = (class01_img + class21_img) - Skin_img
-        active_mat_dilate = morphology.dilation(active_mat, morphology.ball(2))
-        aux =active_mat_dilate + ROI_acti_mat
-        active_mat_invert = util.invert(aux.astype(np.float32))
-        active_invert_img = sitk.GetImageFromArray(active_mat_invert)
-        active_invert_img.CopyInformation(abdomen_fat_img_slices)
-        active_invert_img=sitk.Cast(active_invert_img, sitk.sitkInt32)
-        edema_img = suma_classes * active_invert_img
-        edema = sitk.GetArrayFromImage(edema_img)
+    #Selecciono el SAT
+    class11_sinROI_img = class11_img -ROI_acti
+    class11_sinROI = sitk.GetArrayFromImage(class11_sinROI_img)
+    class11_sinROI = np.where (class11_sinROI<0, 0, class11_sinROI)
+    class11_sinROI =class11_sinROI * filled
+    class11_sinROI = class11_sinROI.astype(np.float64)
+    class11_sinROI_img_clean = sitk.GetImageFromArray(class11_sinROI)
+    class11_sinROI_img_clean.CopyInformation(abdomen_fat_img_slices)
 
-        classImage2 = np.zeros (abdomen_fat_mat.shape)
-        classImage2[filled == 1] = 15 #SAT
-        classImage2[IMAT == 1] = 31 #IMAT
-        classImage2[VAT == 1] = 11 #VAT
-        classImage2[MT==1] = 8  #MT
-        classImage2[Other_tissue == 1]= 5 #OTHER TISSUE
-        classImage2[Bone == 1] = 2 #BONE/AIR
-        classImage2[air==True] = 7 #AIR
-        classImage2[Skin == 1] = 6 #SKIN
-        classImage2[edema == 1] = 36 #EDEMA+VESSELS
+    #Limpieza de la zona interior  y relleno de los posibles edemas
+    class11_sinROI_img_clean = sitk.Cast(class11_sinROI_img_clean, sitk.sitkInt32)
+    class11_sinROI_mat_clean = sitk.GetArrayFromImage(class11_sinROI_img_clean)
+    class11_sinROI_mat_clean = morphology.opening(class11_sinROI_mat_clean, morphology.ball(2)).astype(np.float64)
+    class11_sinROI_img_clean = sitk.GetImageFromArray(class11_sinROI_mat_clean)
+    class11_sinROI_img_clean.CopyInformation(abdomen_fat_img_slices)
+    class11_sinROI_img_clean = sitk.Cast(class11_sinROI_img_clean, sitk.sitkInt32)
 
-        classImage2_img=sitk.GetImageFromArray(classImage2)
-        classImage2_img.CopyInformation(abdomen_fat_img_slices)
+    class11_sinROI_open = sitk.BinaryOpeningByReconstruction(class11_sinROI_img_clean, kernelRadius = [5,5,5])
+    class11_sinROI_open.CopyInformation(abdomen_fat_img_slices)
 
-        return classImage2_img
+    class11_sinROI_open_mat = sitk.GetArrayFromImage(class11_sinROI_open)
+    class11_sinROI_open_close_mat = morphology.closing (class11_sinROI_open_mat, morphology.ball(2))
+    
+    class11_sinROI_filled = morphology.closing (class11_sinROI_open_close_mat, morphology.ball(5)).astype(np.float64) #este es para rellenar el edema
+    class11_sinROI_filled_img = sitk.GetImageFromArray(class11_sinROI_filled)
+    class11_sinROI_filled_img.CopyInformation(abdomen_fat_img_slices)
+    class11_sinROI_filled_img = sitk.Cast(class11_sinROI_filled_img, sitk.sitkInt32)
+    #Selecciona la zona interior (no selecciono el edema)
+    Out_erosion  =morphology.erosion (filled, morphology.ball(5)).astype(np.float64)
+    BWGmA_incom = util.invert((adap_thres_open_mat).astype(np.float32)).astype(np.float64)
+    Out_erosion_img = sitk.GetImageFromArray(Out_erosion)
+    Out_erosion_img.CopyInformation(abdomen_fat_img_slices)
+    BWGmA_inco_img = sitk.GetImageFromArray(BWGmA_incom)
+    BWGmA_inco_img.CopyInformation(abdomen_fat_img_slices)
+
+    multi = np.multiply (BWGmA_incom, Out_erosion).astype(np.float64)
+    multi_img = sitk.GetImageFromArray(multi)
+    multi_img.CopyInformation(abdomen_fat_img_slices)
+    multi_img = sitk.Cast(multi_img, sitk.sitkInt32)
+    closing =sitk.BinaryClosingByReconstruction ( multi_img, kernelRadius = [7,7,7])
+    opening =sitk.BinaryOpeningByReconstruction ( closing, kernelRadius = [3,3,3])
+
+    interse = opening & class11_sinROI_filled_img
+    interior = opening - interse
+
+    #Convex hull
+    opening_mat = sitk.GetArrayFromImage(interior)
+    opening_mat =morphology.closing (opening_mat, morphology.ball(7))
+    opening_mat = opening_mat.reshape((-1, opening_mat.shape[2]))
+    convex_hull =  morphology.convex_hull_object(opening_mat).astype(np.int32)
+    convex_hull = convex_hull.reshape(abdomen_fat_mat.shape)
+    convex_hull_dilate = morphology.dilation (convex_hull, morphology.ball(2.5)).astype(np.float64)
+    convex_img = sitk.GetImageFromArray(convex_hull_dilate)
+    convex_img.CopyInformation(abdomen_fat_img_slices)
+
+    #Contornos activos, definir contorno interior del SAT
+    active_cont = act_cont (fat_open, convex_img, -3.0, 0.35, 0.35, 1.5, -6.0, 9, RangeSlice_Abdo)
+    active_cont.CopyInformation(abdomen_fat_img_slices)
+    active_mat = sitk.GetArrayFromImage(active_cont)
+
+    #DEINO LAS COMPONENTES
+    #SAT
+    SAT = np.where ( active_mat==1, 0, filled).astype(np.float64)
+    SAT_img = sitk.GetImageFromArray(SAT)
+    SAT_img.CopyInformation(abdomen_fat_img_slices)
+
+    #IMAT
+    IMAT_area = xor (ROI_acti_mat.astype(np.bool_),  active_mat.astype(np.bool_) ).astype(np.float64)
+    IMAT = np.where (classImage*IMAT_area == brillo[1,1], 1, 0).astype(np.float64)
+    IMAT_img = sitk.GetImageFromArray(IMAT)
+    IMAT_img.CopyInformation(abdomen_fat_img_slices)
+
+    #BONE
+    BoneAndFat = np.where (classImage==brillo[0,1], 1, 0).astype(np.float64)
+    BoneAndFat_img = sitk.GetImageFromArray(BoneAndFat)
+    BoneAndFat_img.CopyInformation(abdomen_fat_img_slices)
+    Bone = IMAT_area * BoneAndFat
+    Bone = Bone.astype(np.float64)
+    Bone_img = sitk.GetImageFromArray(Bone)
+    Bone_img.CopyInformation(abdomen_fat_img_slices)
+
+    #MT
+    MT = class21_clean.astype(np.float64)
+    MT_img = sitk.GetImageFromArray(MT)
+    MT_img.CopyInformation(abdomen_fat_img_slices)
+
+    #VAT
+    VAT_area = classImage*ROI_acti_mat
+    VAT = np.where (VAT_area > 0, 1, 0).astype(np.float64)
+    VAT_img = sitk.GetImageFromArray(VAT)
+    VAT_img.CopyInformation(abdomen_fat_img_slices)
+
+    #AIR
+    ROI_erode = morphology.erosion (ROI_acti_mat, morphology.ball(1.5)).astype(np.float32)
+    air = (VAT_area * BoneAndFat).astype(np.bool_)
+    air = air * ROI_erode
+    air = air.astype(np.float64)
+    air_img = sitk.GetImageFromArray(air.astype(np.int32))
+    air_img.CopyInformation(abdomen_fat_img_slices)
+
+    #OTHER TISSUE
+    Other_tissue = np.multiply(class21_clean, ROI_erode).astype(np.float64)
+    Other_tissue_img = sitk.GetImageFromArray(Other_tissue)
+    Other_tissue_img.CopyInformation(abdomen_fat_img_slices)
+
+    #SKIN
+    filled_erode = morphology.erosion (filled, morphology.ball(7)).astype(np.float32)
+    Skin_class01 = util.invert(filled_erode) * (class01)
+    Skin_class21 = util.invert(filled_erode) * (class21)
+    Skin = (Skin_class01 + Skin_class21)* filled
+    Skin = Skin.astype(np.float64)
+    Skin_img = sitk.GetImageFromArray(Skin)
+    Skin_img.CopyInformation(abdomen_fat_img_slices)
+
+    #EDEMA + VESSELS
+    suma_classes = (class01_img + class21_img) - Skin_img
+    active_mat_dilate = morphology.dilation(active_mat, morphology.ball(2))
+    aux =active_mat_dilate + ROI_acti_mat
+    active_mat_invert = util.invert(aux.astype(np.float32)).astype(np.float64)
+    active_invert_img = sitk.GetImageFromArray(active_mat_invert)
+    active_invert_img.CopyInformation(abdomen_fat_img_slices)
+    edema_img = suma_classes * active_invert_img
+    edema = sitk.GetArrayFromImage(edema_img)
+
+    classImage2 = np.zeros (abdomen_fat_mat.shape)
+    classImage2[filled == 1] = 15 #SAT
+    classImage2[IMAT == 1] = 31 #IMAT
+    classImage2[VAT == 1] = 11 #VAT
+    classImage2[MT==1] = 8  #MT
+    classImage2[Other_tissue == 1]= 5 #OTHER TISSUE
+    classImage2[Bone == 1] = 2 #BONE/AIR
+    classImage2[air==True] = 7 #AIR
+    classImage2[Skin == 1] = 6 #SKIN
+    classImage2[edema == 1] = 36 #EDEMA+VESSELS
+    classImage2 = classImage2.astype(np.float64)
+    classImage2_img=sitk.GetImageFromArray(classImage2)
+    classImage2_img.CopyInformation(abdomen_fat_img_slices)
+
+    return classImage2_img
 
 def ColorSegmentation_Abdo(outputVolume, Segmentation):
         """
